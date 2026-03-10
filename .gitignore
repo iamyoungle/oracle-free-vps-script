@@ -1,0 +1,8 @@
+# Real config (contains secrets — never commit)
+config.sh
+
+# macOS
+.DS_Store
+
+# AI Tools
+.claude
