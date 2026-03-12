@@ -14,7 +14,7 @@
 #   macOS:          brew install oci-cli jq
 #   Debian/Ubuntu:  sudo apt install jq && pip install oci-cli
 #   RHEL/Fedora:    sudo dnf install jq && pip install oci-cli
-#   Then:           oci session authenticate   (repeat every 24 h)
+#   Then:           Configure OCI API key in ~/.oci/config (or OCI_CONFIG_FILE)
 # =============================================================================
 
 set -uo pipefail
@@ -93,7 +93,7 @@ check_deps() {
 # ── Shared OCI auth flags (used in every oci call) ───────────────────────────
 
 oci_auth_flags() {
-  echo "--config-file $OCI_CONFIG_FILE --profile $OCI_PROFILE --auth security_token"
+  echo "--config-file $OCI_CONFIG_FILE --profile "DEFAULT" --auth api_key"
 }
 
 # ── Setup mode ───────────────────────────────────────────────────────────────
@@ -149,18 +149,43 @@ validate_config() {
   fi
 }
 
+# ── Pre-flight checks ─────────────────────────────────────────────────────────
+# Checks if an instance of the target shape already exists.
+
+check_existing_instance() {
+  log_info "Checking for existing VM.Standard.A1.Flex instances..."
+  
+  # Fetch running/provisioning instances with the target shape
+  # shellcheck disable=SC2046
+  local existing_instances
+  existing_instances=$(oci compute instance list \
+    -c "$TENANCY_ID" \
+    $(oci_auth_flags) \
+    --lifecycle-state RUNNING \
+    --lifecycle-state PROVISIONING \
+    --lifecycle-state STARTING \
+    2>/dev/null | jq -r '
+      .data[]? 
+      | select(.shape == "VM.Standard.A1.Flex") 
+      | .id
+    ')
+
+  if [[ -n "$existing_instances" ]]; then
+    log_ok "An existing VM.Standard.A1.Flex instance was found!"
+    log_ok "Instance ID(s):"
+    for id in $existing_instances; do
+      log_ok "  - $id"
+    done
+    log_ok "Exiting. No need to provision a new one."
+    exit 0
+  fi
+}
+
 # ── Provisioning loop ─────────────────────────────────────────────────────────
 
 run_provisioning() {
   validate_config
-
-  # Calculate max attempts (0 = unlimited)
-  local max_attempts
-  if [[ "$MAX_HOURS" -eq 0 ]]; then
-    max_attempts=0   # handled as unlimited below
-  else
-    max_attempts=$(( MAX_HOURS * 3600 / REQUEST_INTERVAL ))
-  fi
+  check_existing_instance
 
   local interval=$REQUEST_INTERVAL
 
@@ -175,45 +200,38 @@ run_provisioning() {
   log_info "Subnet:    $SUBNET_ID"
   log_info "Domain:    $AVAIL_DOMAIN"
   log_info "Shape:     VM.Standard.A1.Flex (${OCPUS} OCPUs, ${RAM_GB} GB RAM)"
-  [[ "$max_attempts" -eq 0 ]] \
-    && log_info "Max runs:  unlimited" \
-    || log_info "Max runs:  $max_attempts (~${MAX_HOURS}h)"
+  log_info "Mode:      Indefinite (API Key Authentication)"
   log ""
 
   local i=0
-  while true; do
-    # Honour max_attempts when set
-    if [[ "$max_attempts" -gt 0 && "$i" -ge "$max_attempts" ]]; then
-      log_warn "Reached maximum attempts ($max_attempts). Exiting."
-      break
-    fi
+  SECONDS=0 # Built-in bash variable tracking seconds since script start
 
+  while true; do
     # Sleep between attempts (skip on the very first iteration)
     [[ "$i" -gt 0 ]] && sleep "$interval"
 
     local attempt=$(( i + 1 ))
     local timestamp
     timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+    
+    # Calculate elapsed time
+    local elapsed_h=$(( SECONDS / 3600 ))
+    local elapsed_m=$(( (SECONDS % 3600) / 60 ))
+    local elapsed_s=$(( SECONDS % 60 ))
+    local elapsed_str=$(printf "%02dh:%02dm:%02ds" $elapsed_h $elapsed_m $elapsed_s)
 
-    if [[ "$max_attempts" -eq 0 ]]; then
-      log "[$timestamp] Attempt $attempt"
-    else
-      log "[$timestamp] Attempt $attempt of $max_attempts"
-    fi
+    log "[$timestamp] Attempt $attempt | Elapsed: $elapsed_str"
 
-    # Refresh the auth token every 10 attempts to survive long runs
-    if [[ "$i" -gt 0 && $(( i % 10 )) -eq 0 ]]; then
-      log_info "Refreshing auth token..."
-      oci session refresh --profile "$OCI_PROFILE" 2>/dev/null || true
-    fi
+    # API Keys don't expire, so we don't need to refresh tokens anymore.
+    # We can just keep requesting until we get the instance.
 
     # Build oci command as an array to safely handle arguments with spaces
     local cmd=(
       oci compute instance launch
       --no-retry
       --config-file "$OCI_CONFIG_FILE"
-      --profile     "$OCI_PROFILE"
-      --auth        security_token
+      --profile     "DEFAULT"
+      --auth        api_key
       --compartment-id    "$TENANCY_ID"
       --availability-domain "$AVAIL_DOMAIN"
       --image-id    "$IMAGE_ID"
@@ -259,8 +277,8 @@ run_provisioning() {
         log_warn "Rate limited (429). Increasing interval to ${interval}s."
         ;;
       401)
-        log_error "Authentication failed (401) — session expired."
-        log_error "Run:  oci session authenticate"
+        log_error "Authentication failed (401) — check your API key setup."
+        log_error "Please ensure ~/.oci/config is correctly configured."
         exit 1
         ;;
       "")

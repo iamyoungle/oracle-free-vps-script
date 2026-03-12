@@ -11,8 +11,7 @@ one succeeds — usually within a few hours.
 
 1. Calls `oci compute instance launch` every 60 seconds (configurable)
 2. Parses the JSON response to detect success, rate-limiting, or auth errors
-3. Refreshes the OCI session token every 10 attempts to survive long runs
-4. Exits immediately when the instance is created
+3. Exits immediately when the instance is created
 
 ---
 
@@ -40,17 +39,15 @@ pip install oci-cli
 > Full OCI CLI install guide:
 > https://docs.oracle.com/en-us/iaas/Content/API/SDKDocs/cliinstall.htm
 
-### 2. Authenticate with OCI
+### 2. Configure OCI API Key
 
-```bash
-oci session authenticate
-```
+The script now uses an API Key for authentication so it can run indefinitely without tokens expiring.
 
-- Choose your home region (e.g. `ca-toronto-1`)
-- When prompted for a profile name, enter `DEFAULT` (or whatever you set `OCI_PROFILE` to in `config.sh`)
-- A browser window will open — log in with your Oracle Cloud account
-
-> Sessions expire after **24 hours**. Re-run this command when they do.
+1. Generate an API Key pair in the Oracle Cloud Console (Profile -> API Keys -> Add API Key).
+2. Download the private key.
+3. Copy the Configuration File Preview provided by Oracle.
+4. Paste the configuration into `~/.oci/config`.
+5. Ensure the `key_file` path in `~/.oci/config` points to your downloaded private key.
 
 ---
 
@@ -101,7 +98,6 @@ SSH_PUBLIC_KEY="ssh-rsa AAAA... user@host"
 ./oracle_vps.sh
 ```
 
-The script will keep trying until it succeeds or `MAX_HOURS` is reached.
 
 ---
 
@@ -126,10 +122,8 @@ oracle-free-vps-script/
 | `SSH_PUBLIC_KEY` | *(required)* | SSH public key for instance access |
 | `OCPUS` | `4` | Number of CPU cores (free-tier max: 4) |
 | `RAM_GB` | `24` | Memory in GB (free-tier max: 24) |
-| `OCI_PROFILE` | `DEFAULT` | OCI CLI profile name |
 | `OCI_CONFIG_FILE` | `~/.oci/config` | Path to OCI config file |
 | `REQUEST_INTERVAL` | `60` | Seconds between each attempt |
-| `MAX_HOURS` | `24` | Stop after N hours (`0` = run indefinitely) |
 | `SILENT` | `true` | `true` = concise output; `false` = show raw API responses |
 
 ---
@@ -171,10 +165,8 @@ screen -S oracle
 ## Troubleshooting
 
 **"Authentication failed (401)"**
-Your session has expired. Re-authenticate:
-```bash
-oci session authenticate
-```
+Your API key configuration is incorrect or missing.
+Ensure your `~/.oci/config` file is correctly formatted and the `key_file` path is absolute and correct.
 
 **"Missing required tools: oci jq"**
 Install the prerequisites listed at the top of this README.
@@ -182,7 +174,6 @@ Install the prerequisites listed at the top of this README.
 **Script keeps running but never succeeds**
 Capacity in your region/availability domain is very limited. Try:
 - Changing `AVAIL_DOMAIN` to a different domain (use `--setup` to list them)
-- Setting `MAX_HOURS=0` to run indefinitely
 
 **Want verbose output to debug responses?**
 Set `SILENT=false` in `config.sh`.

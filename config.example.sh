@@ -35,13 +35,11 @@ RAM_GB=24    # Memory GB  (free-tier max: 24)
 
 # ── OCI Authentication ───────────────────────────────────────────────────────
 
-OCI_PROFILE="DEFAULT"
 OCI_CONFIG_FILE="$HOME/.oci/config"
 
 # ── Retry Behaviour ──────────────────────────────────────────────────────────
 
 REQUEST_INTERVAL=60   # Seconds between each attempt
-MAX_HOURS=24          # Give up after this many hours (0 = run indefinitely)
 
 # ── Output ───────────────────────────────────────────────────────────────────
 
